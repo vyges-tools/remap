@@ -1,0 +1,6 @@
+vyges-remap
+© 2026 Vyges (https://vyges.com). All Rights Reserved.
+
+This product includes software developed by Vyges. Licensed under the Apache
+License, Version 2.0 (see LICENSE). It orchestrates the vyges-emap driver
+(mockturtle emap) and, for Liberty->genlib, ABC — invoked as separate processes.
