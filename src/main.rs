@@ -97,9 +97,12 @@ fn tail(s: &str) -> String {
 }
 
 /// Run `vyges-emap` once; parse its stats sidecar. Never panics.
-fn run_emap(emap: &str, aig: &str, genlib: &str, out: &str, stats_path: &str, multioutput: bool) -> Result<Stats, String> {
+fn run_emap(emap: &str, aig: &str, genlib: &str, module: &str, out: &str, stats_path: &str, multioutput: bool) -> Result<Stats, String> {
     let mut cmd = Command::new(emap);
     cmd.args(["--aig", aig, "--genlib", genlib, "-o", out, "--stats", stats_path]);
+    if !module.is_empty() {
+        cmd.args(["--module", module]); // preserve the module name (AIGER carries none)
+    }
     if multioutput {
         cmd.arg("--multioutput");
     }
@@ -139,7 +142,7 @@ fn verilog_to_aig(verilog: &str, top: &str, out_aig: &str) -> Result<(), String>
     let yosys = std::env::var("VYGES_YOSYS").unwrap_or_else(|_| "yosys".into());
     let script = format!(
         "read_verilog {verilog}; hierarchy -top {top} -check; proc; flatten; \
-         techmap; opt -purge; aigmap; write_aiger {out_aig}"
+         techmap; opt -purge; aigmap; write_aiger -symbols {out_aig}"
     );
     let output = Command::new(&yosys)
         .args(["-q", "-p", &script])
@@ -216,14 +219,14 @@ fn cmd_emap(args: &[String]) -> i32 {
     };
 
     let emap = std::env::var("VYGES_EMAP").unwrap_or_else(|_| "vyges-emap".into());
-    let base = match run_emap(&emap, &aig, &genlib, &ws("base.v"), &ws("base.json"), false) {
+    let base = match run_emap(&emap, &aig, &genlib, top, &ws("base.v"), &ws("base.json"), false) {
         Ok(s) => s,
         Err(e) => {
             let _ = std::fs::remove_dir_all(&work);
             return fail(want_json, top, &e);
         }
     };
-    let mo = match run_emap(&emap, &aig, &genlib, out, &ws("mo.json"), true) {
+    let mo = match run_emap(&emap, &aig, &genlib, top, out, &ws("mo.json"), true) {
         Ok(s) => s,
         Err(e) => {
             let _ = std::fs::remove_dir_all(&work);
