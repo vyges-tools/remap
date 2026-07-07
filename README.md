@@ -12,7 +12,10 @@ many multi-output cells (adders, compressors) were mapped that a single-output m
 ## Usage
 
 ```sh
-vyges-remap emap --aig design.aig --genlib tech.genlib --top design -o design.remap.v --json
+# from RTL — Yosys extracts the AIG:
+vyges-remap emap --verilog design.v --top design --genlib tech.genlib -o design.remap.v --json
+# or from a pre-made AIGER netlist:
+vyges-remap emap --aig design.aig --genlib tech.genlib -o design.remap.v --json
 ```
 
 ```jsonc
@@ -34,6 +37,7 @@ vyges-remap emap --aig design.aig --genlib tech.genlib --top design -o design.re
 
 - **`vyges-emap`** (the mockturtle emap driver) — resolved via `$VYGES_EMAP` (default
   `vyges-emap` on `PATH`). Ships from `vyges-tools/vyges-mockturtle`.
+- **Yosys** — for `--verilog` (RTL → AIG), resolved via `$VYGES_YOSYS` (default `yosys`).
 - **ABC** — only for `--liberty` (Liberty→genlib), resolved via `$VYGES_ABC` (default `abc`).
 
 ## As a Loom engine

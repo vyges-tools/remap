@@ -1,12 +1,14 @@
 //! vyges-remap — a Loom engine for **file-level multi-output technology
-//! re-mapping**. It wraps the `vyges-emap` driver (mockturtle `emap`): given an
-//! AIGER netlist + a technology genlib, it runs a single-output baseline and a
-//! multi-output pass and reports the before/after cell/area delta, writing the
-//! remapped Verilog netlist. `--describe` advertises the structured contract to
-//! `vyges mcp`; `--json` emits the result envelope.
+//! re-mapping**. It wraps the `vyges-emap` driver (mockturtle `emap`): given
+//! Verilog RTL (Yosys extracts the AIG) or a pre-made AIGER netlist + a
+//! technology genlib, it runs a single-output baseline and a multi-output pass
+//! and reports the before/after cell/area delta, writing the remapped Verilog
+//! netlist. `--describe` advertises the structured contract to `vyges mcp`;
+//! `--json` emits the result envelope.
 //!
-//! The `vyges-emap` driver is resolved via `$VYGES_EMAP` (default `vyges-emap`
-//! on PATH); `--liberty` is converted to a genlib via ABC (`$VYGES_ABC`).
+//! External tools are resolved via env (default binary on PATH): the driver
+//! `$VYGES_EMAP`; Verilog→AIG via Yosys `$VYGES_YOSYS`; Liberty→genlib via ABC
+//! `$VYGES_ABC`.
 //!
 //! House style: std + serde_json only.
 
@@ -19,13 +21,13 @@ const USAGE: &str = "\
 vyges-remap — file-level multi-output technology re-mapping (mockturtle emap)
 
 usage:
-  vyges-remap emap --aig <in.aig> (--genlib <g> | --liberty <lib>) [--top T] [-o out.v] [--json]
+  vyges-remap emap (--verilog <d.v> --top T | --aig <a.aig>) (--genlib <g> | --liberty <lib>) [-o out.v] [--json]
   vyges-remap --describe        structured tool contract (for `vyges mcp`)
   vyges-remap --version | --help
 
-Runs the vyges-emap driver twice (single-output baseline + multi-output) over the
-AIGER netlist and reports the before/after cell/area delta. Resolve the driver via
-$VYGES_EMAP (default: `vyges-emap` on PATH).
+Extracts an AIG (Yosys, from --verilog) or takes one (--aig), then runs the
+vyges-emap driver twice (single-output baseline + multi-output) and reports the
+before/after cell/area delta. Tools resolve via $VYGES_EMAP / $VYGES_YOSYS / $VYGES_ABC.
 ";
 
 /// Cell/area/multi-output counts parsed from a `vyges-emap` stats sidecar.
@@ -67,21 +69,21 @@ fn describe() -> Value {
         "name": "remap",
         "summary": "File-level multi-output technology re-mapping (mockturtle emap): AIGER + genlib -> mapped netlist + before/after cell/area delta.",
         "invocation": {
-            "args_template": ["emap", "--aig", "{aig}", "--genlib", "{genlib}"],
+            "args_template": ["emap", "--verilog", "{verilog}", "--top", "{top}", "--genlib", "{genlib}"],
             "optional": [
-                { "arg": "top", "flag": "--top" },
                 { "arg": "out", "flag": "-o" }
             ],
             "emits_json": true
         },
         "inputs": {
             "type": "object",
-            "required": ["aig", "genlib"],
+            "required": ["verilog", "top", "genlib"],
             "properties": {
-                "aig":    { "type": "string", "description": "AIGER netlist (.aig) of the logic to remap" },
-                "genlib": { "type": "string", "description": "technology genlib (multi-output cells are derived from xor/maj gates)" },
-                "top":    { "type": "string", "description": "top module name (metadata)" },
-                "out":    { "type": "string", "description": "path to write the remapped Verilog netlist" }
+                "verilog": { "type": "string", "description": "Verilog RTL of the logic to remap (Yosys extracts the AIG)" },
+                "top":     { "type": "string", "description": "top module name" },
+                "genlib":  { "type": "string", "description": "technology genlib (multi-output cells are derived from xor/maj gates)" },
+                "aig":     { "type": "string", "description": "alternative to verilog: a pre-made AIGER netlist" },
+                "out":     { "type": "string", "description": "path to write the remapped Verilog netlist" }
             }
         },
         "artifacts": [ { "role": "netlist", "field": "out_netlist" } ]
@@ -130,6 +132,25 @@ fn liberty_to_genlib(liberty: &str, out_genlib: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Verilog RTL → AIGER via Yosys (`$VYGES_YOSYS`, default `yosys`). Synthesizes
+/// the combinational logic down to an AIG for emap to technology-map: elaborate,
+/// flatten, expand operators (`$mul`/`$add`/…) to gates, then `aigmap`.
+fn verilog_to_aig(verilog: &str, top: &str, out_aig: &str) -> Result<(), String> {
+    let yosys = std::env::var("VYGES_YOSYS").unwrap_or_else(|_| "yosys".into());
+    let script = format!(
+        "read_verilog {verilog}; hierarchy -top {top} -check; proc; flatten; \
+         techmap; opt -purge; aigmap; write_aiger {out_aig}"
+    );
+    let output = Command::new(&yosys)
+        .args(["-q", "-p", &script])
+        .output()
+        .map_err(|e| format!("cannot run yosys: {e} (set $VYGES_YOSYS or install yosys)"))?;
+    if !output.status.success() || !std::path::Path::new(out_aig).exists() {
+        return Err(format!("yosys Verilog->AIG failed: {}", tail(&String::from_utf8_lossy(&output.stderr))));
+    }
+    Ok(())
+}
+
 fn fail(want_json: bool, top: &str, msg: &str) -> i32 {
     if want_json {
         println!("{:#}", json!({ "schema": "vyges-remap/1.0", "status": "error", "top": top, "error": msg }));
@@ -156,16 +177,28 @@ fn emit(want_json: bool, r: &Value) {
 fn cmd_emap(args: &[String]) -> i32 {
     let opt = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).map(String::as_str);
     let want_json = args.iter().any(|a| a == "--json");
-    let Some(aig) = opt("--aig") else {
-        eprintln!("vyges-remap emap: --aig <in.aig> is required");
-        return 2;
-    };
     let top = opt("--top").unwrap_or("top");
     let out = opt("-o").or_else(|| opt("--out")).unwrap_or("remap_out.v");
 
     let work = std::env::temp_dir().join(format!("vyges-remap-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&work);
     let ws = |n: &str| work.join(n).to_string_lossy().to_string();
+
+    // resolve the AIG: a pre-made AIGER (--aig), or extracted from Verilog RTL
+    // via Yosys (--verilog + --top).
+    let aig: String = if let Some(a) = opt("--aig") {
+        a.to_string()
+    } else if let Some(v) = opt("--verilog") {
+        let a = ws("design.aig");
+        if let Err(e) = verilog_to_aig(v, top, &a) {
+            let _ = std::fs::remove_dir_all(&work);
+            return fail(want_json, top, &format!("Verilog->AIG: {e}"));
+        }
+        a
+    } else {
+        eprintln!("vyges-remap emap: --aig <a.aig> or --verilog <d.v> (with --top) is required");
+        return 2;
+    };
 
     // genlib: direct (--genlib) or derived from Liberty via ABC (--liberty).
     let genlib: String = if let Some(g) = opt("--genlib") {
@@ -183,14 +216,14 @@ fn cmd_emap(args: &[String]) -> i32 {
     };
 
     let emap = std::env::var("VYGES_EMAP").unwrap_or_else(|_| "vyges-emap".into());
-    let base = match run_emap(&emap, aig, &genlib, &ws("base.v"), &ws("base.json"), false) {
+    let base = match run_emap(&emap, &aig, &genlib, &ws("base.v"), &ws("base.json"), false) {
         Ok(s) => s,
         Err(e) => {
             let _ = std::fs::remove_dir_all(&work);
             return fail(want_json, top, &e);
         }
     };
-    let mo = match run_emap(&emap, aig, &genlib, out, &ws("mo.json"), true) {
+    let mo = match run_emap(&emap, &aig, &genlib, out, &ws("mo.json"), true) {
         Ok(s) => s,
         Err(e) => {
             let _ = std::fs::remove_dir_all(&work);
@@ -275,7 +308,8 @@ mod tests {
         assert_eq!(d["invocation"]["args_template"][0], "emap");
         // required inputs match the template's {tokens}
         let req = d["inputs"]["required"].as_array().unwrap();
-        assert!(req.contains(&json!("aig")) && req.contains(&json!("genlib")));
+        assert!(req.contains(&json!("verilog")) && req.contains(&json!("genlib")));
+        assert_eq!(d["invocation"]["args_template"][1], "--verilog");
         assert_eq!(d["artifacts"][0]["field"], "out_netlist");
     }
 }
