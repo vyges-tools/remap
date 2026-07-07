@@ -38,7 +38,9 @@ vyges-remap emap --aig design.aig --genlib tech.genlib -o design.remap.v --json
 - **`vyges-emap`** (the mockturtle emap driver) — resolved via `$VYGES_EMAP` (default
   `vyges-emap` on `PATH`). Ships from `vyges-tools/vyges-mockturtle`.
 - **Yosys** — for `--verilog` (RTL → AIG), resolved via `$VYGES_YOSYS` (default `yosys`).
-- **ABC** — only for `--liberty` (Liberty→genlib), resolved via `$VYGES_ABC` (default `abc`).
+- **ABC** — the **CEC oracle** (verifies the remap is combinationally equivalent to the
+  input) and `--liberty` (Liberty→genlib), resolved via `$VYGES_ABC` (default `abc`; e.g.
+  `yosys-abc`). `--no-cec` skips the check. A failed CEC makes the result an error.
 
 ## As a Loom engine
 

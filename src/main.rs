@@ -21,7 +21,7 @@ const USAGE: &str = "\
 vyges-remap — file-level multi-output technology re-mapping (mockturtle emap)
 
 usage:
-  vyges-remap emap (--verilog <d.v> --top T | --aig <a.aig>) (--genlib <g> | --liberty <lib>) [-o out.v] [--json]
+  vyges-remap emap (--verilog <d.v> --top T | --aig <a.aig>) (--genlib <g> | --liberty <lib>) [-o out.v] [--no-cec] [--json]
   vyges-remap --describe        structured tool contract (for `vyges mcp`)
   vyges-remap --version | --help
 
@@ -154,6 +154,31 @@ fn verilog_to_aig(verilog: &str, top: &str, out_aig: &str) -> Result<(), String>
     Ok(())
 }
 
+/// CEC oracle: is the mapped netlist combinationally equivalent to the input AIG?
+/// Uses ABC (`$VYGES_ABC`) with the recipe mockturtle's emap test uses:
+/// `read_genlib; read -m <mapped.v>; cec -n <input.aig>`. `Ok(true|false)` when the
+/// check ran; `Err` if ABC was unavailable or inconclusive (→ reported, not fatal).
+fn cec_check(genlib: &str, mapped_v: &str, input_aig: &str) -> Result<bool, String> {
+    let abc = std::env::var("VYGES_ABC").unwrap_or_else(|_| "abc".into());
+    let script = format!("read_genlib {genlib}; read -m {mapped_v}; cec -n {input_aig}");
+    let output = Command::new(&abc)
+        .args(["-q", &script])
+        .output()
+        .map_err(|e| format!("cannot run abc for CEC: {e} (set $VYGES_ABC)"))?;
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    if text.contains("Networks are equivalent") {
+        Ok(true)
+    } else if text.contains("Networks are NOT equivalent") {
+        Ok(false)
+    } else {
+        Err(format!("abc cec inconclusive: {}", tail(&text)))
+    }
+}
+
 fn fail(want_json: bool, top: &str, msg: &str) -> i32 {
     if want_json {
         println!("{:#}", json!({ "schema": "vyges-remap/1.0", "status": "error", "top": top, "error": msg }));
@@ -175,6 +200,10 @@ fn emit(want_json: bool, r: &Value) {
     println!("  cells: {} -> {}  ({})", cc["before"], cc["after"], pctf(&cc["pct"]));
     println!("  area:  {} -> {}  ({})", ca["before"], ca["after"], pctf(&ca["pct"]));
     println!("  netlist: {}", r["out_netlist"].as_str().unwrap_or("-"));
+    let cec = &r["cec"];
+    if cec["checked"] == json!(true) {
+        println!("  cec: {}", if cec["equivalent"] == json!(true) { "equivalent" } else { "NOT EQUIVALENT — remap rejected" });
+    }
 }
 
 fn cmd_emap(args: &[String]) -> i32 {
@@ -233,11 +262,23 @@ fn cmd_emap(args: &[String]) -> i32 {
             return fail(want_json, top, &e);
         }
     };
+    // CEC oracle — verify the remapped netlist is combinationally equivalent to
+    // the input logic. Skippable (--no-cec); a failed check makes it an error.
+    let cec = if args.iter().any(|a| a == "--no-cec") {
+        json!({ "checked": false, "reason": "skipped (--no-cec)" })
+    } else {
+        match cec_check(&genlib, out, &aig) {
+            Ok(true) => json!({ "checked": true, "equivalent": true }),
+            Ok(false) => json!({ "checked": true, "equivalent": false }),
+            Err(e) => json!({ "checked": false, "reason": e }),
+        }
+    };
     let _ = std::fs::remove_dir_all(&work);
 
+    let equivalent_false = cec.get("equivalent") == Some(&json!(false));
     let result = json!({
         "schema": "vyges-remap/1.0",
-        "status": "ok",
+        "status": if equivalent_false { "error" } else { "ok" },
         "top": top,
         "aig": aig,
         "genlib": genlib,
@@ -248,10 +289,11 @@ fn cmd_emap(args: &[String]) -> i32 {
             "cell_count": delta_json(base.gates, mo.gates),
             "cell_area":  delta_json(base.area, mo.area)
         },
-        "multioutput_cells": mo.mo
+        "multioutput_cells": mo.mo,
+        "cec": cec
     });
     emit(want_json, &result);
-    0
+    i32::from(equivalent_false)
 }
 
 fn run(args: Vec<String>) -> i32 {
