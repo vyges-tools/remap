@@ -188,6 +188,37 @@ fn fail(want_json: bool, top: &str, msg: &str) -> i32 {
     1
 }
 
+/// Structured summary events to STDERR (mirrors vyges-drc / vyges-lvs). The
+/// remap result is a before/after aggregate delta — no pass/fail — so this is a
+/// single completion event carrying the headline. `objects` names the netlist.
+fn emit_remap_events(r: &Value) {
+    use vyges_events::{Event, Severity};
+    let f = |v: &Value| v.as_f64().unwrap_or(0.0);
+    let pctf = |v: &Value| v.as_f64().map(|x| format!("{x:+.2}%")).unwrap_or_else(|| "n/a".into());
+    let cc = &r["delta"]["cell_count"];
+    let ca = &r["delta"]["cell_area"];
+    let top = r["top"].as_str().unwrap_or("?");
+    let netlist = r["out_netlist"].as_str().unwrap_or("-");
+    vyges_events::emit(
+        &Event::new(
+            "vyges-remap",
+            Severity::Info,
+            format!(
+                "remap complete on {top}: cells {} -> {} ({}), area {} -> {} ({}), {} multi-output cell(s)",
+                f(&cc["before"]),
+                f(&cc["after"]),
+                pctf(&cc["pct"]),
+                f(&ca["before"]),
+                f(&ca["after"]),
+                pctf(&ca["pct"]),
+                f(&r["multioutput_cells"]),
+            ),
+        )
+        .with_code("REMAP-DONE")
+        .with_objects(vec![format!("netlist:{netlist}")]),
+    );
+}
+
 fn emit(want_json: bool, r: &Value) {
     if want_json {
         println!("{r:#}");
@@ -292,6 +323,7 @@ fn cmd_emap(args: &[String]) -> i32 {
         "multioutput_cells": mo.mo,
         "cec": cec
     });
+    emit_remap_events(&result);
     emit(want_json, &result);
     i32::from(equivalent_false)
 }
