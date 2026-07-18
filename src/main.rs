@@ -43,7 +43,10 @@ fn parse_stats(text: &str) -> Option<Stats> {
     Some(Stats {
         gates: v.get("gates")?.as_f64()?,
         area: v.get("area")?.as_f64()?,
-        mo: v.get("multioutput_gates").and_then(Value::as_f64).unwrap_or(0.0),
+        mo: v
+            .get("multioutput_gates")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0),
     })
 }
 
@@ -68,6 +71,11 @@ fn describe() -> Value {
     json!({
         "name": "remap",
         "summary": "File-level multi-output technology re-mapping (mockturtle emap): AIGER + genlib -> mapped netlist + before/after cell/area delta.",
+        "maturity": "structured",
+        "provenance_limitations": [
+            "input_hash covers the argument vector, not the content of the Verilog, AIGER or genlib it names.",
+            "The mapping and the equivalence check are performed by external emap/abc/yosys binaries resolved at run time; their versions are not part of input_hash, so the same arguments can produce a different result under a different toolchain build."
+        ],
         "invocation": {
             "args_template": ["emap", "--verilog", "{verilog}", "--top", "{top}", "--genlib", "{genlib}"],
             "optional": [
@@ -86,7 +94,12 @@ fn describe() -> Value {
                 "out":     { "type": "string", "description": "path to write the remapped Verilog netlist" }
             }
         },
-        "artifacts": [ { "role": "netlist", "field": "out_netlist" } ]
+        "artifacts": [ { "role": "netlist", "field": "out_netlist" } ],
+        "assertion": {
+            "id": "remap-equivalent",
+            "field": "equivalent",
+            "pass_when": { "is_true": true }
+        }
     })
 }
 
@@ -97,9 +110,19 @@ fn tail(s: &str) -> String {
 }
 
 /// Run `vyges-emap` once; parse its stats sidecar. Never panics.
-fn run_emap(emap: &str, aig: &str, genlib: &str, module: &str, out: &str, stats_path: &str, multioutput: bool) -> Result<Stats, String> {
+fn run_emap(
+    emap: &str,
+    aig: &str,
+    genlib: &str,
+    module: &str,
+    out: &str,
+    stats_path: &str,
+    multioutput: bool,
+) -> Result<Stats, String> {
     let mut cmd = Command::new(emap);
-    cmd.args(["--aig", aig, "--genlib", genlib, "-o", out, "--stats", stats_path]);
+    cmd.args([
+        "--aig", aig, "--genlib", genlib, "-o", out, "--stats", stats_path,
+    ]);
     if !module.is_empty() {
         cmd.args(["--module", module]); // preserve the module name (AIGER carries none)
     }
@@ -116,7 +139,8 @@ fn run_emap(emap: &str, aig: &str, genlib: &str, module: &str, out: &str, stats_
             tail(&String::from_utf8_lossy(&output.stderr))
         ));
     }
-    let text = std::fs::read_to_string(stats_path).map_err(|e| format!("no stats from vyges-emap: {e}"))?;
+    let text = std::fs::read_to_string(stats_path)
+        .map_err(|e| format!("no stats from vyges-emap: {e}"))?;
     parse_stats(&text).ok_or_else(|| "vyges-emap stats unparsable".to_string())
 }
 
@@ -130,7 +154,10 @@ fn liberty_to_genlib(liberty: &str, out_genlib: &str) -> Result<(), String> {
         .output()
         .map_err(|e| format!("cannot run abc: {e} (set $VYGES_ABC or install abc)"))?;
     if !output.status.success() || !std::path::Path::new(out_genlib).exists() {
-        return Err(format!("abc Liberty->genlib failed: {}", tail(&String::from_utf8_lossy(&output.stderr))));
+        return Err(format!(
+            "abc Liberty->genlib failed: {}",
+            tail(&String::from_utf8_lossy(&output.stderr))
+        ));
     }
     Ok(())
 }
@@ -149,7 +176,10 @@ fn verilog_to_aig(verilog: &str, top: &str, out_aig: &str) -> Result<(), String>
         .output()
         .map_err(|e| format!("cannot run yosys: {e} (set $VYGES_YOSYS or install yosys)"))?;
     if !output.status.success() || !std::path::Path::new(out_aig).exists() {
-        return Err(format!("yosys Verilog->AIG failed: {}", tail(&String::from_utf8_lossy(&output.stderr))));
+        return Err(format!(
+            "yosys Verilog->AIG failed: {}",
+            tail(&String::from_utf8_lossy(&output.stderr))
+        ));
     }
     Ok(())
 }
@@ -181,7 +211,10 @@ fn cec_check(genlib: &str, mapped_v: &str, input_aig: &str) -> Result<bool, Stri
 
 fn fail(want_json: bool, top: &str, msg: &str) -> i32 {
     if want_json {
-        println!("{:#}", json!({ "schema": "vyges-remap/1.0", "status": "error", "top": top, "error": msg }));
+        println!(
+            "{:#}",
+            json!({ "schema": "vyges-remap/1.0", "status": "error", "top": top, "error": msg })
+        );
     } else {
         eprintln!("vyges-remap: {msg}");
     }
@@ -194,7 +227,11 @@ fn fail(want_json: bool, top: &str, msg: &str) -> i32 {
 fn emit_remap_events(r: &Value) {
     use vyges_events::{Event, Severity};
     let f = |v: &Value| v.as_f64().unwrap_or(0.0);
-    let pctf = |v: &Value| v.as_f64().map(|x| format!("{x:+.2}%")).unwrap_or_else(|| "n/a".into());
+    let pctf = |v: &Value| {
+        v.as_f64()
+            .map(|x| format!("{x:+.2}%"))
+            .unwrap_or_else(|| "n/a".into())
+    };
     let cc = &r["delta"]["cell_count"];
     let ca = &r["delta"]["cell_area"];
     let top = r["top"].as_str().unwrap_or("?");
@@ -224,21 +261,51 @@ fn emit(want_json: bool, r: &Value) {
         println!("{r:#}");
         return;
     }
-    let pctf = |v: &Value| v.as_f64().map(|x| format!("{x:+.2}%")).unwrap_or_else(|| "-".into());
+    let pctf = |v: &Value| {
+        v.as_f64()
+            .map(|x| format!("{x:+.2}%"))
+            .unwrap_or_else(|| "-".into())
+    };
     let cc = &r["delta"]["cell_count"];
     let ca = &r["delta"]["cell_area"];
-    println!("[remap] {}   {} multi-output cells", r["top"].as_str().unwrap_or("?"), r["multioutput_cells"]);
-    println!("  cells: {} -> {}  ({})", cc["before"], cc["after"], pctf(&cc["pct"]));
-    println!("  area:  {} -> {}  ({})", ca["before"], ca["after"], pctf(&ca["pct"]));
+    println!(
+        "[remap] {}   {} multi-output cells",
+        r["top"].as_str().unwrap_or("?"),
+        r["multioutput_cells"]
+    );
+    println!(
+        "  cells: {} -> {}  ({})",
+        cc["before"],
+        cc["after"],
+        pctf(&cc["pct"])
+    );
+    println!(
+        "  area:  {} -> {}  ({})",
+        ca["before"],
+        ca["after"],
+        pctf(&ca["pct"])
+    );
     println!("  netlist: {}", r["out_netlist"].as_str().unwrap_or("-"));
     let cec = &r["cec"];
     if cec["checked"] == json!(true) {
-        println!("  cec: {}", if cec["equivalent"] == json!(true) { "equivalent" } else { "NOT EQUIVALENT — remap rejected" });
+        println!(
+            "  cec: {}",
+            if cec["equivalent"] == json!(true) {
+                "equivalent"
+            } else {
+                "NOT EQUIVALENT — remap rejected"
+            }
+        );
     }
 }
 
 fn cmd_emap(args: &[String]) -> i32 {
-    let opt = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).map(String::as_str);
+    let opt = |name: &str| {
+        args.iter()
+            .position(|a| a == name)
+            .and_then(|i| args.get(i + 1))
+            .map(String::as_str)
+    };
     let want_json = args.iter().any(|a| a == "--json");
     let top = opt("--top").unwrap_or("top");
     let out = opt("-o").or_else(|| opt("--out")).unwrap_or("remap_out.v");
@@ -279,7 +346,15 @@ fn cmd_emap(args: &[String]) -> i32 {
     };
 
     let emap = std::env::var("VYGES_EMAP").unwrap_or_else(|_| "vyges-emap".into());
-    let base = match run_emap(&emap, &aig, &genlib, top, &ws("base.v"), &ws("base.json"), false) {
+    let base = match run_emap(
+        &emap,
+        &aig,
+        &genlib,
+        top,
+        &ws("base.v"),
+        &ws("base.json"),
+        false,
+    ) {
         Ok(s) => s,
         Err(e) => {
             let _ = std::fs::remove_dir_all(&work);
@@ -307,8 +382,20 @@ fn cmd_emap(args: &[String]) -> i32 {
     let _ = std::fs::remove_dir_all(&work);
 
     let equivalent_false = cec.get("equivalent") == Some(&json!(false));
+    // The verdict, hoisted to the top level and tri-state on purpose.
+    //
+    // A remap that was not checked is not a remap that is correct: with --no-cec, or when abc
+    // could not give a conclusive answer, nothing has established that the mapped netlist still
+    // computes the input function. That is `null` — unknown — and never a pass. A consumer
+    // reading only `status` would see "ok" for an unverified transform, which is precisely the
+    // conflation the two-axis envelope exists to prevent.
+    let equivalent = match (cec.get("checked"), cec.get("equivalent")) {
+        (Some(c), Some(e)) if *c == json!(true) => e.clone(),
+        _ => Value::Null,
+    };
     let result = json!({
         "schema": "vyges-remap/1.0",
+        "equivalent": equivalent,
         "status": if equivalent_false { "error" } else { "ok" },
         "top": top,
         "aig": aig,
