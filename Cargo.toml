@@ -1,6 +1,6 @@
 [package]
 name = "vyges-remap"
-version = "0.1.17"
+version = "0.1.18"
 edition = "2021"
 description = "Loom engine: file-level multi-output technology re-mapping (mockturtle emap) over the vyges-emap driver"
 repository = "https://github.com/vyges-tools/remap"
