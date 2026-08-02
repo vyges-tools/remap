@@ -103,7 +103,7 @@ dependencies = [
 
 [[package]]
 name = "vyges-remap"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "serde_json",
  "vyges-events",
