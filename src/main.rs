@@ -69,6 +69,7 @@ fn delta_json(b: f64, a: f64) -> Value {
 /// The `--describe` payload the mcp registry parses into a typed MCP tool.
 fn describe() -> Value {
     json!({
+        "schema": "vyges-tool-descriptor/1.1",
         "name": "remap",
         "summary": "File-level multi-output technology re-mapping (mockturtle emap): AIGER + genlib -> mapped netlist + before/after cell/area delta.",
         "maturity": "structured",
