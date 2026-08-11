@@ -18,12 +18,12 @@ use std::process::Command;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const USAGE: &str = "\
-vyges-remap — file-level multi-output technology re-mapping (mockturtle emap)
+vyges loom remap — file-level multi-output technology re-mapping (mockturtle emap)
 
 usage:
-  vyges-remap emap (--verilog <d.v> --top T | --aig <a.aig>) (--genlib <g> | --liberty <lib>) [-o out.v] [--no-cec] [--json]
-  vyges-remap --describe        structured tool contract (for `vyges mcp`)
-  vyges-remap --version | --help
+  vyges loom remap emap (--verilog <d.v> --top T | --aig <a.aig>) (--genlib <g> | --liberty <lib>) [-o out.v] [--no-cec] [--json]
+  vyges loom remap --describe        structured tool contract (for `vyges mcp`)
+  vyges loom remap --version | --help
 
 Extracts an AIG (Yosys, from --verilog) or takes one (--aig), then runs the
 vyges-emap driver twice (single-output baseline + multi-output) and reports the
