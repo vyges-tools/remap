@@ -438,7 +438,7 @@ fn run(args: Vec<String>) -> i32 {
     }
 }
 
-fn main() {
+pub fn main() {
     std::process::exit(run(std::env::args().skip(1).collect()));
 }
 

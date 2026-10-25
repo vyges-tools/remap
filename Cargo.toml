@@ -7,6 +7,11 @@ repository = "https://github.com/vyges-tools/remap"
 homepage = "https://vyges.com"
 license = "Apache-2.0"
 
+[features]
+# The command-line entry built into the library too (`cli_main`), for the suite binaries
+# that link every engine and run the one they are invoked as.
+suite = []
+
 [[bin]]
 name = "vyges-remap"
 path = "src/main.rs"
