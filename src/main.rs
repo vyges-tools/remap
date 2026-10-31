@@ -78,18 +78,21 @@ fn describe() -> Value {
             "The mapping and the equivalence check are performed by external emap/abc/yosys binaries resolved at run time; their versions are not part of input_hash, so the same arguments can produce a different result under a different toolchain build."
         ],
         "invocation": {
-            "args_template": ["emap", "--verilog", "{verilog}", "--top", "{top}", "--genlib", "{genlib}"],
+            "args_template": ["emap", "--genlib", "{genlib}"],
             "optional": [
+                { "arg": "verilog", "flag": "--verilog" },
+                { "arg": "top", "flag": "--top" },
+                { "arg": "aig", "flag": "--aig" },
                 { "arg": "out", "flag": "-o" }
             ],
             "emits_json": true
         },
         "inputs": {
             "type": "object",
-            "required": ["verilog", "top", "genlib"],
+            "required": ["genlib"],
             "properties": {
-                "verilog": { "type": "string", "description": "Verilog RTL of the logic to remap (Yosys extracts the AIG)" },
-                "top":     { "type": "string", "description": "top module name" },
+                "verilog": { "type": "string", "description": "Verilog RTL of the logic to remap (Yosys extracts the AIG); give it with top, or give aig instead" },
+                "top":     { "type": "string", "description": "top module name (with verilog)" },
                 "genlib":  { "type": "string", "description": "technology genlib (multi-output cells are derived from xor/maj gates)" },
                 "aig":     { "type": "string", "description": "alternative to verilog: a pre-made AIGER netlist" },
                 "out":     { "type": "string", "description": "path to write the remapped Verilog netlist" }
@@ -471,10 +474,15 @@ mod tests {
         assert_eq!(d["name"], "remap");
         assert_eq!(d["invocation"]["emits_json"], true);
         assert_eq!(d["invocation"]["args_template"][0], "emap");
-        // required inputs match the template's {tokens}
+        // required inputs match the template's {tokens}; the logic comes from verilog+top OR aig,
+        // so neither is required on its own, and both reach the command line as options
         let req = d["inputs"]["required"].as_array().unwrap();
-        assert!(req.contains(&json!("verilog")) && req.contains(&json!("genlib")));
-        assert_eq!(d["invocation"]["args_template"][1], "--verilog");
+        assert_eq!(req, &vec![json!("genlib")]);
+        assert_eq!(d["invocation"]["args_template"][1], "--genlib");
+        let opt: Vec<&str> = d["invocation"]["optional"].as_array().unwrap().iter().map(|o| o["arg"].as_str().unwrap()).collect();
+        for k in ["verilog", "top", "aig", "out"] {
+            assert!(opt.contains(&k), "{k} is passed");
+        }
         assert_eq!(d["artifacts"][0]["field"], "out_netlist");
     }
 }
