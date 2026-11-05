@@ -94,8 +94,8 @@ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
 name = "vyges-events"
-version = "0.1.52"
-source = "git+https://github.com/vyges-tools/events?branch=main#00588a9d75a6fa07edf48fcdad3dfc76907c0e38"
+version = "0.1.53"
+source = "git+https://github.com/vyges-tools/events?branch=main#1fc532e533e9ad9232d42b541eff9718d03cd680"
 dependencies = [
  "serde",
  "serde_json",
@@ -103,7 +103,7 @@ dependencies = [
 
 [[package]]
 name = "vyges-remap"
-version = "0.1.52"
+version = "0.1.53"
 dependencies = [
  "serde_json",
  "vyges-events",
