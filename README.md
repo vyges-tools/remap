@@ -1,5 +1,7 @@
 # vyges-remap
 
+**[Download Loom](https://vyges.com/products/vyges-cli/#install)** · install the free [Vyges CLI](https://vyges.com/products/vyges-cli/), then `vyges install loom`
+
 A **Loom engine** for **file-level multi-output technology re-mapping** — the "enhanced
 ABC" capability ([Antmicro's techmapping work](https://antmicro.com/blog/2026/06/multi-output-techmapping-in-openroad))
 as a standalone step in a synthesis / place-and-route flow.
